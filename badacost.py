@@ -1,9 +1,5 @@
-import numpy as np
-import scipy.optimize
-
-
 class BAdaCost:
-    def __init__(optimizer, n_iters, learning_rate, C, eps):
+    def __init__(self,optimizer, n_iters, learning_rate, C, eps):
         self.optimizer = optimizer #weak learners
         self.n_iters = n_iters #number of iterations
         self.lr = learning_rate #learning rate
@@ -12,7 +8,7 @@ class BAdaCost:
         self.weak_learners = [0]*n_iters #weak learners
         self.Cprime = C - np.diag(np.array(np.sum(C,axis=1).flatten())[0]) #modified cost matrix
         self.n_classes = C.shape[1] #number of classes
-        self.margin = ((-1/(self.n_classes-1))*np.ones(self.n_classes,self.n_classes) 
+        self.margin = ((-1/(self.n_classes-1))*np.ones([self.n_classes,self.n_classes]) 
                  + (self.n_classes/(self.n_classes-1))*np.eye(self.n_classes)) #margin vector
         self.eps = eps 
         
@@ -44,7 +40,8 @@ class BAdaCost:
                 predicted_as_j_being_i = y1 and pred1
                 WeightsSum[i,j] = np.dot(W,predicted_as_j_being_i)
         alpha0 = 1.0
-        alpha = scipy.optimize.fmin(lambda x: cost_sensitive_loss_function(x,C_star,WeightsSum),x0=alpha0)
+        alpha = scipy.optimize.fmin(lambda x: self.cost_sensitive_loss_function(x,C_star,WeightsSum),
+                                    x0=alpha0,disp=0)
         return alpha 
     
     def cost_sensitive_loss_function(self,alpha,C_star,WeightsSum):
@@ -62,9 +59,10 @@ class BAdaCost:
         return func_value # deriv_value
     
     def compute_weak_learner_cost(self,pred_wl, y, C2, beta, W):
-        cost = 0
+        cost = 0.0
         for i in range(len(pred_wl)):
-            cost += W[i]*np.exp(beta*C2[y[i]],pred_wl[i])
+            #print(W[i]*np.exp(beta*C2[y[i]],pred_wl[i]))
+            cost += W[i]*np.exp(beta*C2[y[i],pred_wl[i]])
         return cost
         
     def train(self,X,y):
@@ -75,12 +73,13 @@ class BAdaCost:
             beta = 1
             c = 100000 #inf
             delta_c = 100000 #inf
-            while delta_c >= eps:
-                C_wl = translate_to_cost_matrix(C2,beta)
-                G = train_multiclass_cost_sensitive_WL(X,y,self.sample_weights,C_wl)
-                wl_preds = G.predict(X,y)
-                beta = compute_weak_learner_weight(C2,sample_weights,wl_preds,y)
-                c_new = compute_weak_learner_cost(wl_preds,y,C2,beta,W)
+            while delta_c >= self.eps:
+                #print(beta)
+                C_wl = self.translate_to_cost_matrix(C2,beta)
+                G = self.train_multiclass_cost_sensitive_WL(X,y,sample_weights,C_wl)
+                wl_preds = G.predict(X)
+                beta = self.compute_weak_learner_weight(C2,sample_weights,wl_preds,y)[0]                
+                c_new = self.compute_weak_learner_cost(wl_preds,y,C2,beta,sample_weights)
                 delta_c = c-c_new
                 if beta <= 0:
                     break
@@ -92,11 +91,11 @@ class BAdaCost:
             #weight
             for j in range(X.shape[1]):
                 exp_j = C2[y[j],wl_preds[j]]
-                sample_weights[j] *= np.exp(alpha*exp_j)
+                sample_weights[j] *= np.exp(beta*exp_j)
             sample_weights /= np.sum(sample_weights)
             
     def predict(self,X):
-        n = X.shape[1]
+        n = X.shape[0]
         margin_vec = np.zeros([self.n_classes,n])
         for i in range(len(self.weak_learners)):
             #row vector with the labels
@@ -104,5 +103,15 @@ class BAdaCost:
             for j in range(n):
                 margin_vec[:,j] += self.weights[i]*self.margin[:,z[j]]
                 
-        predicted = np.min(self.Cprime*margin_vec)
-        return predicted  
+        predicted = self.Cprime*margin_vec
+        predicted = np.argmin(predicted.transpose(),axis=1)
+        return predicted.reshape(1,n)
+    
+    
+    #need to be modified for cost matrix. Now it just train simple 
+    #sklearn DT
+    def train_multiclass_cost_sensitive_WL(self,X,y,w,C_wl):
+        dt = self.optimizer
+        dt.fit(X,y)
+        return dt
+               
