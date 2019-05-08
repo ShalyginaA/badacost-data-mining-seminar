@@ -1,9 +1,11 @@
+import numpy as np
+import scipy.optimize
+
 class BAdaCost:
     def __init__(self,optimizer, n_iters, learning_rate, C, eps):
         self.optimizer = optimizer #weak learners
         self.n_iters = n_iters #number of iterations
         self.lr = learning_rate #learning rate
-        #self.sample_weights = [0]*n_iters
         self.weights = np.zeros(n_iters) #weights of weak learners
         self.weak_learners = [0]*n_iters #weak learners
         self.Cprime = C - np.diag(np.array(np.sum(C,axis=1).flatten())[0]) #modified cost matrix
@@ -52,20 +54,15 @@ class BAdaCost:
         for i in range(K):
             for j in range(K):
                 func_value += WeightsSum[i,j]*np.exp(alpha*C_star[i,j])
-        #deriv_value = 0
-        #for i in range(K):
-        #    for j in range(K):
-         #       deriv_value += WeightsSum[i,j]*C_star[i,j]*np.exp(alpha*C_star[i,j])
-        return func_value # deriv_value
+        return func_value 
     
     def compute_weak_learner_cost(self,pred_wl, y, C2, beta, W):
         cost = 0.0
         for i in range(len(pred_wl)):
-            #print(W[i]*np.exp(beta*C2[y[i]],pred_wl[i]))
             cost += W[i]*np.exp(beta*C2[y[i],pred_wl[i]])
         return cost
         
-    def train(self,X,y):
+    def fit(self,X,y):
         N = X.shape[0]
         sample_weights = (1/N)*np.ones(N)
         C2 = self.Cprime * self.margin
@@ -94,24 +91,34 @@ class BAdaCost:
                 sample_weights[j] *= np.exp(beta*exp_j)
             sample_weights /= np.sum(sample_weights)
             
+    def weak_learner_prediction(self,weak_learner,X):
+        probs = weak_learner.predict_proba(X)
+        prediction = []
+        n = probs.shape[0]
+        for i in range(n):
+            a = np.dot(self.Cprime,probs[i])
+            a_min = np.argmin(a,axis=1)
+            prediction.append(a_min)
+        return np.array(prediction).reshape(1,n)[0]
+            
+                   
     def predict(self,X):
         n = X.shape[0]
+        M = len(self.weak_learners)
         margin_vec = np.zeros([self.n_classes,n])
         for i in range(len(self.weak_learners)):
             #row vector with the labels
-            z = self.weak_learners[i].predict(X)
+            z = self.weak_learner_prediction(self.weak_learners[i],X)
             for j in range(n):
                 margin_vec[:,j] += self.weights[i]*self.margin[:,z[j]]
-                
-        predicted = self.Cprime*margin_vec
+          
+        predicted = -self.Cprime*margin_vec
         predicted = np.argmin(predicted.transpose(),axis=1)
         return predicted.reshape(1,n)
     
     
-    #need to be modified for cost matrix. Now it just train simple 
-    #sklearn DT
     def train_multiclass_cost_sensitive_WL(self,X,y,w,C_wl):
-        dt = self.optimizer
-        dt.fit(X,y)
-        return dt
+        wl = self.optimizer
+        wl.fit(X,y)
+        return wl
                
