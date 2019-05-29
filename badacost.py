@@ -48,7 +48,7 @@ class BAdaCost:
     
     def cost_sensitive_loss_function(self,alpha,C_star,WeightsSum):
         #Loss function computation for a given
-        #alpha (weak learner weight in the CostSAMME algorithm).
+        #alpha 
         K = C_star.shape[0]
         func_value = 0
         for i in range(K):
@@ -60,6 +60,7 @@ class BAdaCost:
         cost = 0.0
         for i in range(len(pred_wl)):
             cost += W[i]*np.exp(beta*C2[y[i],pred_wl[i]])
+            
         return cost
         
     def fit(self,X,y):
@@ -68,18 +69,17 @@ class BAdaCost:
         C2 = self.Cprime * self.margin
         for i in range(self.n_iters):
             beta = 1
-            c = 100000 #inf
-            delta_c = 100000 #inf
+            c = 2**63-1 #inf
+            delta_c = 2**63-1 #inf
             while delta_c >= self.eps:
-                #print(beta)
                 C_wl = self.translate_to_cost_matrix(C2,beta)
                 G = self.train_multiclass_cost_sensitive_WL(X,y,sample_weights,C_wl)
-                wl_preds = G.predict(X)
+                #wl_preds = G.predict(X)
+                wl_preds = self.weak_learner_prediction(G,X,C_wl)
                 beta = self.compute_weak_learner_weight(C2,sample_weights,wl_preds,y)[0]                
                 c_new = self.compute_weak_learner_cost(wl_preds,y,C2,beta,sample_weights)
                 delta_c = c-c_new
-                if beta <= 0:
-                    break
+                c = c_new
             self.weak_learners[i] = G
             self.weights[i] = beta
             beta = self.lr*beta
@@ -89,14 +89,20 @@ class BAdaCost:
             for j in range(X.shape[1]):
                 exp_j = C2[y[j],wl_preds[j]]
                 sample_weights[j] *= np.exp(beta*exp_j)
+            #renormalize sample weights
             sample_weights /= np.sum(sample_weights)
             
-    def weak_learner_prediction(self,weak_learner,X):
+    def train_multiclass_cost_sensitive_WL(self,X,y,w,C_wl):
+        wl = self.optimizer
+        wl.fit(X,y)
+        return wl
+            
+    def weak_learner_prediction(self,weak_learner,X,C):
         probs = weak_learner.predict_proba(X)
         prediction = []
         n = probs.shape[0]
         for i in range(n):
-            a = np.dot(self.Cprime,probs[i])
+            a = np.dot(C,probs[i])
             a_min = np.argmin(a,axis=1)
             prediction.append(a_min)
         return np.array(prediction).reshape(1,n)[0]
@@ -108,17 +114,10 @@ class BAdaCost:
         margin_vec = np.zeros([self.n_classes,n])
         for i in range(len(self.weak_learners)):
             #row vector with the labels
-            z = self.weak_learner_prediction(self.weak_learners[i],X)
+            z = self.weak_learner_prediction(self.weak_learners[i],X,self.Cprime)
             for j in range(n):
                 margin_vec[:,j] += self.weights[i]*self.margin[:,z[j]]
           
         predicted = -self.Cprime*margin_vec
         predicted = np.argmin(predicted.transpose(),axis=1)
-        return predicted.reshape(1,n)
-    
-    
-    def train_multiclass_cost_sensitive_WL(self,X,y,w,C_wl):
-        wl = self.optimizer
-        wl.fit(X,y)
-        return wl
-               
+        return np.array(predicted.reshape(1,n))[0]
